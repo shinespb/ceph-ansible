@@ -2,8 +2,27 @@
 # You can override default vars defined in defaults/main.yml here,
 # but I would advice to use host or group vars instead
 
-## Ceph options
+####################
+# OSD CRUSH LOCATION
+####################
+
+# The following options will build a ceph.conf with OSD sections
+# Example:
+# [osd.X]
+# osd crush location = "root=location"
 #
+# This works with your inventory file
+# To match the following 'osd_crush_location' option the inventory must look like:
+#
+# [osds]
+# osd0 ceph_crush_root=foo ceph_crush_rack=bar
+
+crush_location: false
+osd_crush_location: "'root={{ ceph_crush_root }} rack={{ ceph_crush_rack }} host={{ ansible_hostname }}'"
+
+##############
+# CEPH OPTIONS
+##############
 
 # ACTIVATE THE FSID VARIABLE FOR NON-VAGRANT DEPLOYMENT
 fsid: "{{ cluster_uuid.stdout }}"
@@ -22,6 +41,9 @@ cephx: true
 #
 # !! WARNING !!
 
+# USE WITH CAUTION
+# Erase partitions structure and layout of the given devices below prior to prepare them
+zap_devices: false
 
 # Declare devices
 # All the scenarii inherit from the following device declaration
@@ -29,9 +51,15 @@ cephx: true
 devices:
   - /dev/sdb
   - /dev/sdc
-  - /dev/sdd
-  - /dev/sde
 
+# Device discovery is based on the Ansible fact 'ansible_devices'
+# which reports all the devices on a system. If chosen all the disks
+# found will be passed to ceph-disk. You should not be worried on using
+# this option since ceph-disk has a built-in check which looks for empty devices.
+# Thus devices with existing partition tables will not be used.
+# This mode prevents you from filling out the 'devices' variable above.
+#
+osd_auto_discovery: false
 
 # I. First scenario: journal and osd_data on the same device
 # Use 'true' to enable this scenario
@@ -74,3 +102,12 @@ osd_directories:
   - /var/lib/ceph/osd/mydir2
   - /var/lib/ceph/osd/mydir3
   - /var/lib/ceph/osd/mydir4
+
+
+##########
+# DOCKER #
+##########
+
+ceph_containerized_deployment: false
+ceph_osd_docker_username: ceph
+ceph_osd_docker_imagename: "osd:latest"

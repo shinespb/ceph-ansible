@@ -1,15 +1,10 @@
 ---
-- name: Fail on unsupported system
-  fail: "msg=System not supported {{ ansible_system }}"
-  when: "ansible_system not in ['Linux']"
+- include: os_check.yml
 
-- name: Fail on unsupported architecture
-  fail: "msg=Architecture not supported {{ ansible_architecture }}"
-  when: "ansible_architecture not in ['x86_64']"
+- include: os_tuning.yml
 
-- name: Fail on unsupported distribution
-  fail: "msg=Distribution not supported {{ ansible_os_family }}"
-  when: "ansible_os_family not in ['Debian', 'RedHat']"
+- include: prerequisite_ice.yml
+  when: ceph_stable_ice
 
 - include: install_on_redhat.yml
   when: ansible_os_family == 'RedHat'
@@ -17,20 +12,32 @@
 - include: install_on_debian.yml
   when: ansible_os_family == 'Debian'
 
-- name: Check for a Ceph socket
+- name: check for a Ceph socket
   shell: "stat /var/run/ceph/*.asok > /dev/null 2>&1"
   ignore_errors: true
   register: socket
+  changed_when: False
 
-- name: Generate cluster UUID
-  shell: "uuidgen | tee /etc/ceph/ceph_cluster_uuid.conf" creates=/etc/ceph/ceph_cluster_uuid.conf
+- name: generate cluster UUID
+  shell: >
+    uuidgen | tee fetch/ceph_cluster_uuid.conf
+    creates=fetch/ceph_cluster_uuid.conf
+  connection: local
+  sudo: false
   register: cluster_uuid
 
-- name: Read cluster UUID if it already exists
-  command: cat /etc/ceph/ceph_cluster_uuid.conf removes=/etc/ceph/ceph_cluster_uuid.conf
+- name: read cluster UUID if it already exists
+  command: >
+    cat fetch/ceph_cluster_uuid.conf
+    removes=fetch/ceph_cluster_uuid.conf
+  connection: local
+  sudo: false
   register: cluster_uuid
+  changed_when: False
 
-- name: Generate Ceph configuration file
+- include: check-mandatory-vars.yml
+
+- name: generate Ceph configuration file
   template: >
     src=ceph.conf.j2
     dest=/etc/ceph/ceph.conf
@@ -38,16 +45,8 @@
     group=root
     mode=0644
   notify:
-    - restart ceph
-    - restart ceph-osd-all on ubuntu
-
-- name: Disable OSD directory parsing by updatedb
-  command: updatedb -e /var/lib/ceph
-  ignore_errors: true
-
-- name: Increase PID max value to a very large value
-  sysctl: >
-    name="kernel.pid_max"
-    value=4194303
-    state=present
-    sysctl_file=/etc/sysctl.conf
+    - restart ceph mons
+    - restart ceph osds
+    - restart ceph osds on ubuntu
+    - restart ceph mdss
+    - restart ceph rgws

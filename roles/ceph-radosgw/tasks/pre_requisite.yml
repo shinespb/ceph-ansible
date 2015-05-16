@@ -1,0 +1,29 @@
+---
+- name: create RGW directory
+  file: >
+    path=/var/lib/ceph/radosgw/ceph-radosgw.{{ ansible_hostname }}
+    state=directory
+    owner=root
+    group=root
+    mode=0644
+
+- name: copy RGW bootstrap key
+  copy: >
+    src=fetch/{{ fsid }}/etc/ceph/ceph.client.radosgw.{{ ansible_hostname }}.keyring
+    dest=/var/lib/ceph/radosgw/ceph-radosgw.{{ ansible_hostname }}/keyring
+    owner=root
+    group=root
+    mode=600
+  when: cephx
+
+- name: activate RGW with upstart
+  file: >
+    path=/var/lib/ceph/radosgw/ceph-radosgw.{{ ansible_hostname }}/{{ item }}
+    state=touch
+    owner=root
+    group=root
+    mode=0644
+  with_items:
+    - done
+    - upstart
+  when: ansible_distribution == "Ubuntu"

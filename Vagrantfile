@@ -1,13 +1,20 @@
 # -*- mode: ruby -*-
 # vi: set ft=ruby :
 
+require 'yaml'
 VAGRANTFILE_API_VERSION = '2'
 
-NMONS = 3
-NOSDS = 3
-NMDSS = 0
-NRGWS = 0
-SUBNET = '192.168.42'
+config_file=File.expand_path(File.join(File.dirname(__FILE__), 'vagrant_variables.yml'))
+settings=YAML.load_file(config_file)
+
+NMONS   = settings['mon_vms']
+NOSDS   = settings['osd_vms']
+NMDSS   = settings['mds_vms']
+NRGWS   = settings['rgw_vms']
+CLIENTS = settings['client_vms']
+SUBNET  = settings['subnet']
+BOX     = settings['vagrant_box']
+MEMORY     = settings['memory']
 
 ansible_provision = proc do |ansible|
   ansible.playbook = 'site.yml'
@@ -15,17 +22,55 @@ ansible_provision = proc do |ansible|
   # these aren't supported by Vagrant, see
   # https://github.com/mitchellh/vagrant/issues/3539
   ansible.groups = {
-    'mons' => (0..NMONS - 1).map { |j| "mon#{j}" },
-    'osds' => (0..NOSDS - 1).map { |j| "osd#{j}" },
-    'mdss' => (0..NMDSS - 1).map { |j| "mds#{j}" },
-    'rgws' => (0..NRGWS - 1).map { |j| "rgw#{j}" }
+    'mons'    => (0..NMONS - 1).map { |j| "mon#{j}" },
+    'osds'    => (0..NOSDS - 1).map { |j| "osd#{j}" },
+    'mdss'    => (0..NMDSS - 1).map { |j| "mds#{j}" },
+    'rgws'    => (0..NRGWS - 1).map { |j| "rgw#{j}" },
+    'clients' => (0..CLIENTS - 1).map { |j| "client#{j}" }
   }
 
   # In a production deployment, these should be secret
-  ansible.extra_vars = {
-    fsid: '4a158d27-f750-41d5-9e7f-26ce4c9d2d45',
-    monitor_secret: 'AQAWqilTCDh7CBAAawXt6kyTgLFCxSvJhTEmuw=='
-  }
+  if NMDSS != 0 && NRGWS != 0
+    ansible.extra_vars = {
+      fsid: '4a158d27-f750-41d5-9e7f-26ce4c9d2d45',
+      monitor_secret: 'AQAWqilTCDh7CBAAawXt6kyTgLFCxSvJhTEmuw==',
+      journal_size: 100,
+      monitor_interface: 'eth1',
+      cluster_network: "#{SUBNET}.0/24",
+      public_network: "#{SUBNET}.0/24",
+      radosgw: 'true',
+      mds: 'true',
+    }
+  elsif NMDSS != 0
+    ansible.extra_vars = {
+      fsid: '4a158d27-f750-41d5-9e7f-26ce4c9d2d45',
+      monitor_secret: 'AQAWqilTCDh7CBAAawXt6kyTgLFCxSvJhTEmuw==',
+      journal_size: 100,
+      monitor_interface: 'eth1',
+      cluster_network: "#{SUBNET}.0/24",
+      public_network: "#{SUBNET}.0/24",
+      mds: 'true',
+    }
+  elsif NRGWS != 0
+    ansible.extra_vars = {
+      fsid: '4a158d27-f750-41d5-9e7f-26ce4c9d2d45',
+      monitor_secret: 'AQAWqilTCDh7CBAAawXt6kyTgLFCxSvJhTEmuw==',
+      journal_size: 100,
+      monitor_interface: 'eth1',
+      cluster_network: "#{SUBNET}.0/24",
+      public_network: "#{SUBNET}.0/24",
+      radosgw: 'true',
+    }
+  else
+    ansible.extra_vars = {
+      fsid: '4a158d27-f750-41d5-9e7f-26ce4c9d2d45',
+      monitor_secret: 'AQAWqilTCDh7CBAAawXt6kyTgLFCxSvJhTEmuw==',
+      journal_size: 100,
+      monitor_interface: 'eth1',
+      cluster_network: "#{SUBNET}.0/24",
+      public_network: "#{SUBNET}.0/24",
+    }
+  end
   ansible.limit = 'all'
 end
 
@@ -37,17 +82,31 @@ def create_vmdk(name, size)
 end
 
 Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
-  config.vm.box = 'hashicorp/precise64'
+  config.vm.box = BOX
+  config.ssh.insert_key = false # workaround for https://github.com/mitchellh/vagrant/issues/5048
+
+  (0..CLIENTS - 1).each do |i|
+    config.vm.define "client#{i}" do |client|
+      client.vm.hostname = "ceph-client#{i}"
+      client.vm.network :private_network, ip: "#{SUBNET}.4#{i}"
+      client.vm.provider :virtualbox do |vb|
+        vb.customize ['modifyvm', :id, '--memory', "#{MEMORY}"]
+      end
+      client.vm.provider :vmware_fusion do |v|
+        v.vmx['memsize'] = "#{MEMORY}"
+      end
+    end
+  end
 
   (0..NRGWS - 1).each do |i|
     config.vm.define "rgw#{i}" do |rgw|
       rgw.vm.hostname = "ceph-rgw#{i}"
       rgw.vm.network :private_network, ip: "#{SUBNET}.4#{i}"
       rgw.vm.provider :virtualbox do |vb|
-        vb.customize ['modifyvm', :id, '--memory', '192']
+        vb.customize ['modifyvm', :id, '--memory', "#{MEMORY}"]
       end
       rgw.vm.provider :vmware_fusion do |v|
-        v.vmx['memsize'] = '192'
+        v.vmx['memsize'] = "#{MEMORY}"
       end
     end
   end
@@ -57,10 +116,10 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
       rgw.vm.hostname = "ceph-mds#{i}"
       rgw.vm.network :private_network, ip: "#{SUBNET}.7#{i}"
       rgw.vm.provider :virtualbox do |vb|
-        vb.customize ['modifyvm', :id, '--memory', '192']
+        vb.customize ['modifyvm', :id, '--memory', "#{MEMORY}"]
       end
       rgw.vm.provider :vmware_fusion do |v|
-        v.vmx['memsize'] = '192'
+        v.vmx['memsize'] = "#{MEMORY}"
       end
     end
   end
@@ -70,10 +129,10 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
       mon.vm.hostname = "ceph-mon#{i}"
       mon.vm.network :private_network, ip: "#{SUBNET}.1#{i}"
       mon.vm.provider :virtualbox do |vb|
-        vb.customize ['modifyvm', :id, '--memory', '192']
+        vb.customize ['modifyvm', :id, '--memory', "#{MEMORY}"]
       end
       mon.vm.provider :vmware_fusion do |v|
-        v.vmx['memsize'] = '192'
+        v.vmx['memsize'] = "#{MEMORY}"
       end
     end
   end
@@ -88,14 +147,17 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
           vb.customize ['createhd',
                         '--filename', "disk-#{i}-#{d}",
                         '--size', '11000']
+          # Controller names are dependent on the VM being built.
+          # It is set when the base box is made in our case ubuntu/trusty64.
+          # Be careful while changing the box.
           vb.customize ['storageattach', :id,
-                        '--storagectl', 'SATA Controller',
+                        '--storagectl', 'SATAController',
                         '--port', 3 + d,
                         '--device', 0,
                         '--type', 'hdd',
                         '--medium', "disk-#{i}-#{d}.vdi"]
         end
-        vb.customize ['modifyvm', :id, '--memory', '192']
+        vb.customize ['modifyvm', :id, '--memory', "#{MEMORY}"]
       end
       osd.vm.provider :vmware_fusion do |v|
         (0..1).each do |d|
@@ -103,7 +165,7 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
           v.vmx["scsi0:#{d + 1}.fileName"] =
             create_vmdk("disk-#{i}-#{d}", '11000MB')
         end
-        v.vmx['memsize'] = '192'
+        v.vmx['memsize'] = "#{MEMORY}"
       end
 
       # Run the provisioner after the last machine comes up

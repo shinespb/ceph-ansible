@@ -1,17 +1,28 @@
 ---
-- name: Copy RGW bootstrap key
-  copy: src=fetch/{{ fsid }}/etc/ceph/keyring.radosgw.gateway dest=/etc/ceph/keyring.radosgw.gateway owner=root group=root mode=600
-  when: cephx
-
-- name: Set RGW bootstrap key permissions
-  file: path=/etc/ceph/keyring.radosgw.gateway mode=0600 owner=root group=root
-  when: cephx
-
-## Check OS family
-#
+- include: pre_requisite.yml
+  when: not ceph_containerized_deployment
 
 - include: install_redhat.yml
-  when: ansible_os_family == 'RedHat'
+  when: ansible_os_family == 'RedHat' and radosgw_frontend == 'apache' and not ceph_containerized_deployment
 
 - include: install_debian.yml
-  when: ansible_os_family == 'Debian'
+  when: ansible_os_family == 'Debian' and radosgw_frontend == 'apache' and not ceph_containerized_deployment
+
+- name: install Rados Gateway
+  apt: >
+    pkg=radosgw
+    state=present
+    update_cache=yes
+  when: ansible_os_family == 'Debian' and not ceph_containerized_deployment
+
+- name: install Rados Gateway
+  yum: >
+    name=ceph-radosgw
+    state=present
+  when: ansible_os_family == 'RedHat' and not ceph_containerized_deployment
+
+- include: start_radosgw.yml
+  when: not ceph_containerized_deployment
+
+- include: docker.yml
+  when: ceph_containerized_deployment
